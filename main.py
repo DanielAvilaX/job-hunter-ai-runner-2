@@ -76,6 +76,7 @@ def run():
     existing_ids = set(context.get("existingIds") or [])
     excluir_keywords = context.get("excluirTituloKeywords") or []
     score_threshold = context.get("scoreThreshold", 70)
+    modalidades = context.get("modalidades") or ["Remoto", "Híbrido", "Presencial"]
     auto_apply_config = {"auto_apply_answers": context.get("autoApplyAnswers") or {}}
 
     jobs, fuentes_caidas = fetch_jobs_for_platforms(cargos, list(credenciales.keys()))
@@ -113,7 +114,7 @@ def run():
         # Un fallo con UNA oferta (Gemini caído, Playwright roto, la API del dashboard sin
         # responder, etc.) no debe tumbar el resto del ciclo.
         try:
-            score_result = score_job(job, gemini_key, cv_text=cv_text)
+            score_result = score_job(job, gemini_key, cv_text=cv_text, modalidades=modalidades)
             time.sleep(GEMINI_SLEEP_SECONDS)
 
             if score_result["score"] < score_threshold:
