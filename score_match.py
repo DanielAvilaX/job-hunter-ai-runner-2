@@ -66,10 +66,35 @@ def _extract_json(text):
     return json.loads(match.group(0))
 
 
-def score_job(job, api_key, cv_text=None):
+_MODALIDADES_VALIDAS = {"Remoto", "Híbrido", "Presencial"}
+
+
+def _modalidad_prompt(modalidades):
+    """Sección extra del prompt para respetar la modalidad de trabajo que el candidato eligió en
+    Ajustes. Si eligió las 3 (o no configuró nada), no cambia nada del comportamiento de siempre
+    -- solo cuando excluyó alguna modalidad vale la pena penalizar por eso."""
+    if not modalidades:
+        return ""
+    elegidas = sorted({m for m in modalidades if m in _MODALIDADES_VALIDAS})
+    if not elegidas or len(elegidas) == len(_MODALIDADES_VALIDAS):
+        return ""
+    return f"""
+El candidato SOLO quiere considerar ofertas con esta modalidad de trabajo: {", ".join(elegidas)}.
+- Si la oferta es claramente de una modalidad que el candidato NO eligió (ej. es presencial y el
+  candidato no marcó "Presencial"), el score debe bajar considerablemente (máximo ~20 puntos),
+  aunque el match técnico sea excelente.
+- Si la modalidad de la oferta coincide con alguna de las elegidas, no la penalices por esto.
+- Si la descripción no aclara la modalidad, no penalices por este punto -- dale el beneficio de
+  la duda.
+"""
+
+
+def score_job(job, api_key, cv_text=None, modalidades=None):
     """Devuelve dict {"score": int 0-100, "justificacion": str} para una oferta. Si no se pasa
     `cv_text` (modo multi-usuario, el CV de cada perfil), usa el CV fijo de data/base_cv.md
-    (modo single-user de siempre)."""
+    (modo single-user de siempre). `modalidades` es la lista de modalidades de trabajo que el
+    candidato eligió en Ajustes (Remoto/Híbrido/Presencial) -- None o las 3 juntas equivale a
+    "sin preferencia", el comportamiento de siempre."""
     cv = cv_text or load_base_cv()
     prompt = f"""Eres un reclutador técnico experto. Compara el siguiente CV con la oferta de
 empleo y responde SOLO con un JSON válido (sin texto adicional, sin markdown) con este formato:
@@ -94,7 +119,7 @@ el score (el candidato vive en Bogotá, Colombia):
   stack idéntico).
 Si la descripción no menciona nada sobre ubicación/restricciones de contratación, asume
 PRIORIDAD MEDIA.
-
+{_modalidad_prompt(modalidades)}
 --- CV ---
 {cv}
 
