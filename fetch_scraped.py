@@ -7,6 +7,7 @@ igual que las fuentes de fetch_jobs.py, para poder avisar por Telegram."""
 
 import time
 import unicodedata
+from urllib.parse import quote
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -332,37 +333,50 @@ def fetch_trabajoscom(keyword, limit=20):
 def fetch_manpowergroup(keyword, limit=20):
     """Busca `keyword` en el portal de carreras de ManpowerGroup Colombia (Avature). robots.txt
     permite explícitamente el path /careers (con excepciones a un Disallow: / general), y no
-    exige CAPTCHA en ningún paso del login/postulación."""
+    exige CAPTCHA en ningún paso del login/postulación.
+
+    Navega directo a la URL de resultados (en vez de llenar el input y hacer clic) porque el
+    listado pagina en tandas fijas de 6 (confirmado en vivo: `analista` solista tenía 164
+    resultados en el sitio, pero la búsqueda vía formulario solo deja ver los primeros 6, sin
+    ningún link de "siguiente página" seguido por el scraper) -- eso, no el volumen real de
+    ofertas de ManpowerGroup, era la razón de que tan pocas terminaran auto-aplicadas. La URL
+    soporta un `jobOffset` que sí trae las siguientes tandas de 6."""
+    query = quote(keyword)
 
     def _do():
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(user_agent=USER_AGENT)
-            page.goto(
-                "https://manpowergroupco.avature.net/es_CO/careers/SearchJobs",
-                timeout=30000,
-                wait_until="domcontentloaded",
-            )
-            page.wait_for_selector("input[type=text]", timeout=15000)
-            page.fill("input[type=text]", keyword)
-            page.locator("button:has-text('BUSCAR'), input[type=submit]").first.click(timeout=10000)
-            page.wait_for_timeout(2000)
-            items = page.eval_on_selector_all(
-                "article.article--result",
-                """
-                els => els.map(el => {
-                    const a = el.querySelector('.article__header__text__title a');
-                    const spans = [...el.querySelectorAll('.article__header__text__subtitle span')]
-                        .map(s => s.innerText.trim());
-                    const location = spans.find(t => !t.startsWith('Publicado') && !t.startsWith('ID')) || '';
-                    return {
-                        url: a?.href || '',
-                        title: a?.innerText?.trim() || '',
-                        location: location,
-                    };
-                })
-                """,
-            )
+            items = []
+            for offset in range(0, 30, 6):  # hasta 5 tandas (30 ofertas) por cargo
+                page.goto(
+                    f"https://manpowergroupco.avature.net/es_CO/careers/SearchJobs/{query}"
+                    f"?listFilterMode=1&jobRecordsPerPage=6&jobOffset={offset}",
+                    timeout=30000,
+                    wait_until="domcontentloaded",
+                )
+                page.wait_for_timeout(1200)
+                tanda = page.eval_on_selector_all(
+                    "article.article--result",
+                    """
+                    els => els.map(el => {
+                        const a = el.querySelector('.article__header__text__title a');
+                        const spans = [...el.querySelectorAll('.article__header__text__subtitle span')]
+                            .map(s => s.innerText.trim());
+                        const location = spans.find(t => !t.startsWith('Publicado') && !t.startsWith('ID')) || '';
+                        return {
+                            url: a?.href || '',
+                            title: a?.innerText?.trim() || '',
+                            location: location,
+                        };
+                    })
+                    """,
+                )
+                if not tanda:
+                    break
+                items.extend(tanda)
+                if len(tanda) < 6:
+                    break  # última tanda (no llena) -- no hay más páginas
             browser.close()
             return items
 
